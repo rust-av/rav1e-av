@@ -60,6 +60,7 @@ impl Encoder for Rav1eEncoder {
     }
 
     fn send_frame(&mut self, frame_in: &ArcFrame) -> AvCodecResult<()> {
+        // TODO: 10 and 12 bits formats use 2 bytes
         if let data::frame::MediaKind::Video(ref _info) = frame_in.kind {
             let mut frame_out = self.ctx.new_frame();
 
