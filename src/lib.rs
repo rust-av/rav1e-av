@@ -1,27 +1,26 @@
 extern crate av_codec as codec;
 extern crate av_data as data;
 extern crate rav1e;
+extern crate log;
 
-use std::sync::Arc;
-
-use crate::codec::encoder::*;
-use crate::codec::error::*;
-use crate::data::frame::ArcFrame;
-use crate::data::frame::FrameBufferConv;
+use crate::codec::encoder::{Descr, Descriptor, Encoder};
+use crate::codec::error::{Error as AvCodecError, Result as AvCodecResult};
+use crate::data::frame::{ArcFrame, FrameBufferConv};
 use crate::data::params::{CodecParams, MediaKind, VideoInfo};
 use crate::data::value::Value;
+use rav1e::prelude::{Config, Context, EncoderStatus, FrameType, Rational};
+use std::sync::Arc;
+// use log::debug;
 
-// use rav1e::config::EncoderConfig;
-use rav1e::prelude::{Config, Context, EncoderStatus};
-
-fn rav1e_err_into_av(status: rav1e::EncoderStatus) -> Error {
+// Encoded should be handled
+fn rav1e_status_into_av_error(status: EncoderStatus) -> AvCodecError {
     match status {
-        EncoderStatus::Encoded => Error::Unsupported("Encoded".to_owned()),
-        EncoderStatus::LimitReached => Error::Unsupported("LimitReached".to_owned()),
-        EncoderStatus::NeedMoreData => Error::MoreDataNeeded,
-        EncoderStatus::EnoughData => Error::Unsupported("EnoughData".to_owned()),
-        EncoderStatus::NotReady => Error::Unsupported("NotReady".to_owned()),
-        EncoderStatus::Failure => Error::Unsupported("Failure".to_owned()),
+        EncoderStatus::LimitReached => AvCodecError::Unsupported("LimitReached".to_owned()),
+        EncoderStatus::NeedMoreData => AvCodecError::MoreDataNeeded,
+        EncoderStatus::EnoughData => AvCodecError::Unsupported("EnoughData".to_owned()),
+        EncoderStatus::NotReady => AvCodecError::Unsupported("NotReady".to_owned()),
+        EncoderStatus::Failure => AvCodecError::Unsupported("Failure".to_owned()),
+        EncoderStatus::Encoded => AvCodecError::Unsupported("Encoded".to_owned())
     }
 }
 
@@ -50,7 +49,7 @@ impl Descriptor for Des {
 }
 
 impl Encoder for Rav1eEncoder {
-    fn configure(&mut self) -> Result<()> {
+    fn configure(&mut self) -> AvCodecResult<()> {
         // TODO
         Ok(())
     }
@@ -60,13 +59,9 @@ impl Encoder for Rav1eEncoder {
         None
     }
 
-    fn send_frame(&mut self, frame_in: &ArcFrame) -> Result<()> {
+    fn send_frame(&mut self, frame_in: &ArcFrame) -> AvCodecResult<()> {
         if let data::frame::MediaKind::Video(ref _info) = frame_in.kind {
-            let mut frame_out = rav1e::Frame::new(
-                self.cfg.enc.width,
-                self.cfg.enc.height,
-                self.cfg.enc.chroma_sampling,
-            );
+            let mut frame_out = self.ctx.new_frame();
 
             for i in 0..frame_in.buf.count() {
                 let s: &[u8] = frame_in.buf.as_slice(i).unwrap();
@@ -75,45 +70,45 @@ impl Encoder for Rav1eEncoder {
             }
 
             self.ctx
-                .send_frame(Arc::new(frame_out))
-                .map_err(rav1e_err_into_av)?; // TODO: check error map_err(Into::into)
+                .send_frame(frame_out)
+                .map_err(rav1e_status_into_av_error)?;
             Ok(())
         } else {
             unimplemented!()
         }
     }
 
-    fn receive_packet(&mut self) -> Result<av_data::packet::Packet> {
+    fn receive_packet(&mut self) -> AvCodecResult<av_data::packet::Packet> {
         //         let enc = self.enc.as_mut().unwrap();
         match self.ctx.receive_packet() {
             Ok(packet) => {
                 Ok(av_data::packet::Packet {
                     data: packet.data,
                     pos: None,
-                    stream_index: 0,                           // TODO: ?
-                    t: av_data::timeinfo::TimeInfo::default(), // TODO: time
-                    is_key: packet.frame_type == rav1e::prelude::FrameType::KEY,
+                    stream_index: packet.input_frameno as isize, // TODO: ?
+                    t: av_data::timeinfo::TimeInfo::default(),   // TODO: time
+                    is_key: packet.frame_type == FrameType::KEY,
                     is_corrupted: false,
                 })
             }
-            Err(e) => Err(rav1e_err_into_av(e)),
+            Err(e) => Err(rav1e_status_into_av_error(e)),
         }
     }
 
-    fn flush(&mut self) -> Result<()> {
+    fn flush(&mut self) -> AvCodecResult<()> {
         self.ctx.flush();
         // TODO: this cannot fail?
         Ok(())
     }
 
-    fn set_option<'a>(&mut self, key: &str, val: Value<'a>) -> Result<()> {
+    fn set_option<'a>(&mut self, key: &str, val: Value<'a>) -> AvCodecResult<()> {
         match (key, val) {
             ("w", Value::U64(v)) => self.cfg.enc.width = v as usize,
             ("h", Value::U64(v)) => self.cfg.enc.height = v as usize,
             ("qmin", Value::U64(v)) => self.cfg.enc.min_quantizer = v as u8,
             ("qmax", Value::U64(v)) => self.cfg.enc.quantizer = v as usize,
             ("timebase", Value::Pair(num, den)) => {
-                self.cfg.enc.time_base = rav1e::prelude::Rational::new(num as u64, den as u64)
+                self.cfg.enc.time_base = Rational::new(num as u64, den as u64)
             }
             // TODO: complete options
             _ => unimplemented!(),
@@ -122,12 +117,12 @@ impl Encoder for Rav1eEncoder {
         Ok(())
     }
 
-    fn get_params(&self) -> Result<CodecParams> {
+    fn get_params(&self) -> AvCodecResult<CodecParams> {
         Ok(CodecParams {
             kind: Some(MediaKind::Video(VideoInfo {
                 height: self.cfg.enc.height,
                 width: self.cfg.enc.width,
-                format: Some(Arc::new(*data::pixel::formats::YUV420)), // TODO: support more formats
+                format: Some(Arc::new(*data::pixel::formats::YUV420)),
             })),
             codec_id: Some("av1".to_owned()),
             extradata: None,
@@ -137,7 +132,7 @@ impl Encoder for Rav1eEncoder {
         })
     }
 
-    fn set_params(&mut self, params: &CodecParams) -> Result<()> {
+    fn set_params(&mut self, params: &CodecParams) -> AvCodecResult<()> {
         if let Some(MediaKind::Video(ref info)) = params.kind {
             self.cfg.enc.width = info.width;
             self.cfg.enc.height = info.height;

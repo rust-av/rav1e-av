@@ -13,4 +13,4 @@ keywords = ["av1"]
 av-data = { version = "0.1.0" }
 av-codec = { version = "0.1.0" }
 rav1e = { version = "0.1.0", git = "https://github.com/xiph/rav1e" }
-
+log = "0.4"
