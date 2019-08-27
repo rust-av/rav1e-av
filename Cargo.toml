@@ -1,0 +1,16 @@
+[package]
+name = "rav1e-av"
+version = "0.1.0"
+authors = ["gibix <gibix@riseup.net>"]
+edition = "2018"
+license = "MIT"
+description = "av-codec api for rav1e"
+repository = "https://github.com/rust-av/rav1e-av"
+readme = "README.md"
+keywords = ["av1"]
+
+[dependencies]
+av-data = { version = "0.1.0" }
+av-codec = { version = "0.1.0" }
+rav1e = { version = "0.1.0", git = "https://github.com/xiph/rav1e" }
+
