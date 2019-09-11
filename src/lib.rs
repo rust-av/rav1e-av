@@ -1,16 +1,21 @@
 extern crate av_codec as codec;
 extern crate av_data as data;
-extern crate rav1e;
 extern crate log;
+extern crate rav1e;
 
 use crate::codec::encoder::{Descr, Descriptor, Encoder};
 use crate::codec::error::{Error as AvCodecError, Result as AvCodecResult};
 use crate::data::frame::{ArcFrame, FrameBufferConv};
 use crate::data::params::{CodecParams, MediaKind, VideoInfo};
+use crate::data::pixel::FromPrimitive;
+use crate::data::pixel::ToPrimitive;
 use crate::data::value::Value;
-use rav1e::prelude::{Config, Context, EncoderStatus, FrameType, Rational};
+use log::debug;
+use rav1e::prelude::{
+    ChromaSamplePosition, ChromaSampling, ColorDescription, Config, Context, EncoderStatus,
+    FrameType, Rational,
+};
 use std::sync::Arc;
-// use log::debug;
 
 // Encoded should be handled
 fn rav1e_status_into_av_error(status: EncoderStatus) -> AvCodecError {
@@ -20,7 +25,7 @@ fn rav1e_status_into_av_error(status: EncoderStatus) -> AvCodecError {
         EncoderStatus::EnoughData => AvCodecError::Unsupported("EnoughData".to_owned()),
         EncoderStatus::NotReady => AvCodecError::Unsupported("NotReady".to_owned()),
         EncoderStatus::Failure => AvCodecError::Unsupported("Failure".to_owned()),
-        EncoderStatus::Encoded => AvCodecError::Unsupported("Encoded".to_owned())
+        EncoderStatus::Encoded => AvCodecError::Unsupported("Encoded".to_owned()),
     }
 }
 
@@ -50,11 +55,9 @@ impl Descriptor for Des {
 
 impl Encoder for Rav1eEncoder {
     fn configure(&mut self) -> AvCodecResult<()> {
-        // TODO
         Ok(())
     }
 
-    // TODO: have it as default impl?
     fn get_extradata(&self) -> Option<Vec<u8>> {
         None
     }
@@ -80,7 +83,6 @@ impl Encoder for Rav1eEncoder {
     }
 
     fn receive_packet(&mut self) -> AvCodecResult<av_data::packet::Packet> {
-        //         let enc = self.enc.as_mut().unwrap();
         match self.ctx.receive_packet() {
             Ok(packet) => {
                 Ok(av_data::packet::Packet {
@@ -96,9 +98,9 @@ impl Encoder for Rav1eEncoder {
         }
     }
 
+    /// In Rav1e flush cannot fail
     fn flush(&mut self) -> AvCodecResult<()> {
         self.ctx.flush();
-        // TODO: this cannot fail?
         Ok(())
     }
 
@@ -111,7 +113,16 @@ impl Encoder for Rav1eEncoder {
             ("timebase", Value::Pair(num, den)) => {
                 self.cfg.enc.time_base = Rational::new(num as u64, den as u64)
             }
-            // TODO: complete options
+            ("lowlatency", Value::Bool(v)) => self.cfg.enc.low_latency = v,
+            ("tilecols", Value::U64(v)) => self.cfg.enc.tile_cols = v as usize,
+            ("tilerows", Value::U64(v)) => self.cfg.enc.tile_rows = v as usize,
+            ("tiles", Value::U64(v)) => self.cfg.enc.tiles = v as usize,
+            ("maxkeyframe", Value::U64(v)) => self.cfg.enc.max_key_frame_interval = v,
+            ("minkeyframe", Value::U64(v)) => self.cfg.enc.min_key_frame_interval = v,
+            ("lookaheadframes", Value::U64(v)) => self.cfg.enc.rdo_lookahead_frames = v,
+            ("psnr", Value::Bool(v)) => self.cfg.enc.show_psnr = v,
+            ("trainrdo", Value::Bool(v)) => self.cfg.enc.train_rdo = v,
+            // TODO: complete options: speed settings, mastering display, content light, still picture, tune
             _ => unimplemented!(),
         }
 
@@ -127,17 +138,55 @@ impl Encoder for Rav1eEncoder {
             })),
             codec_id: Some("av1".to_owned()),
             extradata: None,
-            bit_rate: 0, // TODO: expose the information
+            bit_rate: self.cfg.enc.bitrate as usize,
             convergence_window: 0,
-            delay: 0,
+            delay: self.cfg.enc.reservoir_frame_delay.unwrap_or_default() as usize,
         })
     }
 
+    /// Setup [EncoderConfig](rav1e):
     fn set_params(&mut self, params: &CodecParams) -> AvCodecResult<()> {
+        // TODO: extradata
+
+        self.cfg.enc.bitrate = params.bit_rate as i32;
+
         if let Some(MediaKind::Video(ref info)) = params.kind {
+            debug!("set_params received video media info: {:?}", info);
+
             self.cfg.enc.width = info.width;
             self.cfg.enc.height = info.height;
+            self.cfg.enc.reservoir_frame_delay = Some(params.delay as i32);
+
+            if let Some(format) = info.format.as_ref() {
+                self.cfg.enc.color_description = Some(ColorDescription {
+                    color_primaries: FromPrimitive::from_u64(
+                        format.get_primaries().to_u64().unwrap_or_else(|| 2),
+                    )
+                    .unwrap(),
+                    matrix_coefficients: FromPrimitive::from_u64(
+                        format.get_matrix().to_u64().unwrap_or_else(|| 2),
+                    )
+                    .unwrap(),
+                    transfer_characteristics: FromPrimitive::from_u64(
+                        format.get_xfer().to_u64().unwrap_or_else(|| 2),
+                    )
+                    .unwrap(),
+                });
+
+                if format.get_num_comp() > 0 {
+                    let chromaton = format.get_chromaton(0).unwrap();
+                    self.cfg.enc.bit_depth = chromaton.get_depth() as usize;
+                    if chromaton.get_subsampling() == (1, 1) {
+                        self.cfg.enc.chroma_sampling = ChromaSampling::Cs420;
+                    }
+                    self.cfg.enc.chroma_sample_position = ChromaSamplePosition::Unknown // Explicit default
+                }
+            }
+            // TODO: pixel_range
         }
+
+        debug!("Rav1eEncoder Config: {:#?}", self.cfg.enc);
+
         Ok(())
     }
 }
