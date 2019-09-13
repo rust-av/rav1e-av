@@ -1,12 +1,6 @@
 name: Rust
 
-on:
-  pull_request:
-    branches:
-      - master
-  push:
-    branches:
-      - master
+on: [push, pull_request]
 
 jobs:
   build:
@@ -16,16 +10,17 @@ jobs:
     steps:
     - uses: actions/checkout@v1
     - name: Install nasm
+      env:
+        NASM_PKG: nasm-2.14.02
       run: |
-        wget https://www.nasm.us/pub/nasm/releasebuilds/2.14.02/nasm-2.14.02.tar.gz
-        tar -xvf nasm-2.14.02.tar.gz
-        cd nasm-2.14.02
+        wget https://www.nasm.us/pub/nasm/releasebuilds/2.14.02/$NASM_PKG.tar.gz
+        tar -xvf $NASM_PKG.tar.gz
+        cd $NASM_PKG
         ./autogen.sh
-        ./configure --prefix=/usr
+        ./configure --prefix=$HOME/nasm_dir
         make
-        sudo make install
-        nasm -v
-    - name: Build
-      run: cargo build --verbose
+        make install
     - name: Run tests
-      run: cargo test --verbose
+      run: |
+        export PATH=$HOME/nasm_dir/bin:$PATH
+        cargo test --verbose
