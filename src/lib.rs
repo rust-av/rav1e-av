@@ -124,7 +124,7 @@ impl Encoder for Rav1eEncoder {
             ("tiles", Value::U64(v)) => self.cfg.enc.tiles = v as usize,
             ("maxkeyframe", Value::U64(v)) => self.cfg.enc.max_key_frame_interval = v,
             ("minkeyframe", Value::U64(v)) => self.cfg.enc.min_key_frame_interval = v,
-            ("lookaheadframes", Value::U64(v)) => self.cfg.enc.rdo_lookahead_frames = v,
+            ("lookaheadframes", Value::U64(v)) => self.cfg.enc.rdo_lookahead_frames = v as usize,
             ("psnr", Value::Bool(v)) => self.cfg.enc.show_psnr = v,
             ("trainrdo", Value::Bool(v)) => self.cfg.enc.train_rdo = v,
             // TODO: complete options: speed settings, mastering display, content light, still picture, tune
