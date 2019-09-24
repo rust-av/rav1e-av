@@ -70,6 +70,9 @@ impl Encoder for Rav1eEncoder {
             for i in 0..frame_in.buf.count() {
                 let s: &[u8] = frame_in.buf.as_slice(i).unwrap();
                 let stride = frame_in.buf.linesize(i).unwrap();
+
+                debug!("Send frame plane {} with stride {}", i, stride);
+
                 frame_out.planes[i].copy_from_raw_u8(s, stride, 1usize);
             }
 
@@ -85,6 +88,8 @@ impl Encoder for Rav1eEncoder {
     fn receive_packet(&mut self) -> AvCodecResult<av_data::packet::Packet> {
         match self.ctx.receive_packet() {
             Ok(packet) => {
+                debug!("Received packed {:?}", packet);
+
                 Ok(av_data::packet::Packet {
                     data: packet.data,
                     pos: None,
