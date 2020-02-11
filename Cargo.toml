@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["av1"]
 
 [dependencies]
-av-data = { version = "0.1.0" }
-av-codec = { version = "0.1.0" }
-rav1e = { version = "0.1.0", git = "https://github.com/xiph/rav1e" }
+av-data = "0.2"
+av-codec = "0.2"
+rav1e = { version = "0.3.0", git = "https://github.com/xiph/rav1e" }
 log = "0.4"
